@@ -1,0 +1,139 @@
+---
+title: "DADA2 Notebook Version 2/13/18"
+output: html_notebook
+
+---
+This notebook follows along with the tutorial at https://benjjneb.github.io/dada2/tutorial.html
+
+Description:
+DADA2 expects demultiplexed fastq files with Illumina headers and matched IDs.
+By default, my UISeq script pairs reads before removing adapters. To get around, I wrote a python script (DADA2_prep) that runs a subprocess using cutadapt to remove primers from the otherwise raw reads. Then the first DADA2 filterandtrim call uses matchIDs=TRUE to remove any unmatched reads.
+
+User inputs (line #s listed):
+L20: Paths -> path to a directory containing the sequence reads split by sample with the barcodes and primers removed. Sample names should F_SampleID, R_SampleID and a forward/reverse read should exist for each sample.
+Lines 64-68: Filtering parameters. Adjust based on the output of the quality plots and the % passing QC.
+
+###
+Imports and file path:
+```{r}
+library(dada2)
+
+# Paths:
+path = "~/Desktop/SCBNR_reseq/reseq_amoA/DADA2/"
+
+cutadapt_path = paste0(path, 'no_adapter')
+filtered = paste0(path, "filtered")
+
+file_out = paste0(path, "IBP_DADA2_biom_2.13.18.txt")
+
+```
+
+1. Sort files & do a bit of name and type fixing.
+Check to make sure filenames look correct.
+```{r}
+# Get files and split into forward/reverse reads:
+list.files(cutadapt_path)
+fnFs <- sort(list.files(cutadapt_path, pattern="F_"))
+fnRs <- sort(list.files(cutadapt_path, pattern="R_"))
+
+# Get short_sample_names now
+sample.names <- sapply(strsplit(fnFs, "-"), `[`, 1)
+
+# Fullnames
+fnFs <- file.path(cutadapt_path, fnFs)
+fnRs <- file.path(cutadapt_path, fnRs)
+# For some reason this fixes error with plotqualityprofile
+table(sapply(fnFs, class))
+table(sapply(fnRs, class))
+
+```
+
+2. Quality Plots
+In general, look for quality decay in reverse read. <20 quality scores are fairly error-prone.
+Set the length cutoffs in lines 63-64 based on where the green line dips below 20 (ish).
+```{r}
+plotQualityProfile(fnFs[0:2])
+plotQualityProfile(fnRs)
+
+```
+
+3. Filter and trim sequences based on quality scores
+```{r}
+# Set Trunc Len & Max EE
+fwd_trunc = 240
+rev_trunc = 240
+min_len = 0
+maxE_fwd = 2.5
+maxE_rev = 2.5
+
+filtFs <- file.path(filtered, paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(filtered, paste0(sample.names, "_R_filt.fastq.gz"))
+
+# Filter Step:
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs,
+              maxN=0, maxEE=c(maxE_fwd,maxE_rev), truncQ=0, rm.phix=TRUE, truncLen = (c(fwd_trunc, rev_trunc)), compress=TRUE, multithread=TRUE, matchIDs = TRUE) # On Windows set multithread=FALSE
+head(out)
+
+```
+1/8: **At present, I have a max EE of 3 for the forward and 5 for the reverse read. This is a 1.2-2.0% expected error rate. This might be higher than I'd like but I will go with it for now. 
+Other thing to note - error rates are different if running on merged reads after PEAR vs. running on raw reads, due to the way consistent basecalls are handled. 
+2/13: I set this to 2.5 for both. Check the output in track and adjust as needed. 
+
+
+4. Learn Error Rates & Plot Visually:
+```{r}
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF[0:2], nominalQ=TRUE)
+plotErrors(errR[0:2], nominalQ=TRUE)
+```
+
+
+5. Dereplication & Sequence Variant Identification??
+```{r}
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+
+# Name the derep-class objects by the sample names
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+# Calculate sequence variants:
+dadaFs <- dada(derepFs, err=errF, multithread=FALSE)
+dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
+
+# Information and Help
+dadaFs[[1]]
+# help(dada-class)
+```
+
+
+6. Merged Paired End Reads:
+```{r}
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+```
+
+
+7. Sequence Table Construction, Chimera Removal and Sanity Check + Output to file
+```{r}
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+
+# Remove chimeras:
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=FALSE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+
+# Sanity Check - Seq losses at each point?
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoised", "merged", "tabled", "nonchim")
+rownames(track) <- sample.names
+head(track)
+
+write.table(seqtab.nochim, file = file_out, sep='\t')
+```
+** Check the track table. Dividing the columns by the first column will give a % of reads remaining after each QC step. In particular, if a large % of reads (>50%) don't pass filtering, consider increasing the parameters maxE_fwd and maxE_rev on line 62. I wouldn't go above 5 EE per read as this corresponds to a 2% error rate (quite high for amplicon ). I think targetting 50%+ reads passing the pipeline and max_E = 1 is ideal but this will be run dependent.
