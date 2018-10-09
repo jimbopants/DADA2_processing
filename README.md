@@ -10,6 +10,8 @@ I implemented the workflow in the DADA2 tutorial in R because the QIIME2-DADA2 i
 1. Put the de-multiplexed gzipped forward and reverse reads in a directory with sample-specific subdirectories
 2. Run `python DADA2_prep.py --raw_dir DIR --out_dir OUT --primer_set [amoA nxrB or 16S_515F_926R]`
   * This will trim the adapters from the reads, using whichever primer set specified.
+  * If you're unsure of the primerset: run with --verify_only flag, this does just the first 2 samples, check % containing adapter in stdout, should be > 90%
+  * Sample name formats from UIC change every run so check whether sample names make sense with --names flag
   * You can also pass `--fwd --rev` with the primers you want to use if they are not in the defaults.
 3. Run the cells of the DADA2_notebook
   * See the DADA2 tutorial [here](https://benjjneb.github.io/dada2/tutorial.html)
