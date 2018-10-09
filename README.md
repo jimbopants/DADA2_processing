@@ -1,6 +1,6 @@
 ## DADA2 16S Workflow
 
-1. Make a directory and put the de-multiplexed gzipped forward and reverse reads in a subdirectory called raw
+1. Make a directory and put the de-multiplexed gzipped forward and reverse reads in a subdirectory called raw t
 2. Run `python DADA2_prep.py --raw_dir DIR --out_dir OUT --primer_set [amoA nxrB or 16S_515F_926R]`
   * This will trim the adapters from the reads, using whichever primer set specified.
   * You can also pass `--fwd --rev` with the primers you want to use if they are not in the defaults.

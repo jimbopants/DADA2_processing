@@ -1,2 +1,9 @@
 DADA2_notebook.Rmd
 DADA2_notebook.nb.html
+# System files
+*.DS_Store
+# History Files
+.Rhistory
+.Rapp.history
+*.html
+.ipynb_checkpoints
